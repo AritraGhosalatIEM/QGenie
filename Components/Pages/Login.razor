@@ -1,0 +1,37 @@
+@page "/login"
+@rendermode InteractiveServer
+@using Neo4j.Driver;
+@inject NavigationManager NavigationManager
+@inject DatabaseSession DatabaseSession
+<PageTitle>Login</PageTitle>
+<div>
+	Username :
+	<input @bind="user" type="text">
+</div>
+<div>
+	Password :
+	<input @bind="password" type="password">
+</div>
+<div>
+	<button @onclick="Authenticate">Login</button>
+</div>
+@code{
+	//TODO: add cookies if possible
+	private string? user,password;
+	private IDriver? driver;
+	private async Task Authenticate(){
+		driver=GraphDatabase.Driver("bolt://localhost:7687",
+			AuthTokens.Basic(user,password)
+		);
+		DatabaseSession.session=driver.AsyncSession();
+		user=null;
+		password=null;
+		try{
+			await DatabaseSession.session.ExecuteWriteAsync( async (_) => { });
+			NavigationManager.NavigateTo("/counter");
+		}
+		catch(AuthenticationException e){
+			Console.WriteLine("Failed");
+		}
+	}
+}
