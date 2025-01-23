@@ -1,0 +1,89 @@
+@page "/create"
+@rendermode InteractiveServer
+@using Neo4j.Driver;
+@using System.Text;
+@inject NavigationManager NavigationManager
+@inject DatabaseSession DatabaseSession
+<PageTitle>Create</PageTitle>
+<div>
+	Stream:
+	<select @onchange="SetSemesters" id="stream" name="Stream">
+		<option hidden disabled selected value>-- Select --</option>
+		@streams
+	</select>
+</div>
+<div>
+	Semester:
+	<select @onchange="SetSubjects" id="semester" name="Semester">
+		<option hidden disabled selected value>-- Select --</option>
+		@semesters
+	</select>
+</div>
+<div>
+	Paper:
+	<select @onchange="SetSubjectsFromPaper" id="paper" name="Paper">
+		<option selected>All</option>
+		<option>Theory</option>
+		<option>Practical</option>
+		<option>Sessional</option>
+	</select>
+</div>
+<div>
+	Subjects:
+	<select @bind="subject" id="paper" name="Paper">
+		<option hidden disabled selected value>-- Select --</option>
+		@subjects
+	</select>
+</div>
+@code{
+	private MarkupString streams,semesters,subjects;
+	private string stream,semester,subject,paper_type="All";
+	protected override async Task OnInitializedAsync(){
+		StringBuilder element=new StringBuilder();
+		IResultCursor result=await DatabaseSession.session.RunAsync("match (n:Stream) return n;"); 
+		await foreach(IRecord record in result)			
+			element.AppendFormat(
+				"<option value=\"{0}\">{0}</option>",
+				record["n"].As<INode>().Properties["code"]
+			);
+		streams=new MarkupString(element.ToString());
+	}
+	async void SetSemesters(ChangeEventArgs e){
+		StringBuilder element=new StringBuilder();
+		IResultCursor result=await DatabaseSession.session.RunAsync("match (Stream{code:\""+(stream=e.Value.ToString())+"\"})-[:Has]->(n:Semester) return n;"); 
+		await foreach(IRecord record in result)			
+			element.AppendFormat(
+				"<option value=\"{0}\">{0}</option>",
+				record["n"].As<INode>().Properties["number"]
+			);
+		semesters=new MarkupString(element.ToString());
+		StateHasChanged();
+	}
+	async void SetSubjects(ChangeEventArgs e){
+		StringBuilder element=new StringBuilder();
+		IResultCursor result=await DatabaseSession.session.RunAsync(
+			"match (Stream{code:\""+
+			stream+
+			"\"})-[:Has]->(Semester{number:"+
+			(semester=e.Value.ToString())+
+			"})-[:Has]->(n:Subject"+
+			(paper_type.Equals("All")?"":
+				"{type:\""+paper_type+"\"}"
+			)+
+			") return n;"
+		); 
+		await foreach(IRecord record in result)			
+			element.AppendFormat(
+				"<option value=\"{0}\">{0}</option>",
+				record["n"].As<INode>().Properties["name"]
+			);
+		subjects=new MarkupString(element.ToString());
+		StateHasChanged();
+	}
+	async void SetSubjectsFromPaper(ChangeEventArgs e){
+		paper_type=e.Value.ToString();
+		ChangeEventArgs dupe=new ChangeEventArgs();
+		dupe.Value=semester;
+		SetSubjects(dupe);
+	}
+}

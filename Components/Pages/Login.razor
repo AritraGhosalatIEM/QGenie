@@ -15,9 +15,10 @@
 <div>
 	<button @onclick="Authenticate">Login</button>
 </div>
+<p>@message</p>
 @code{
 	//TODO: add cookies if possible
-	private string? user,password;
+	private string? user,password,message;
 	private IDriver? driver;
 	private async Task Authenticate(){
 		driver=GraphDatabase.Driver("bolt://localhost:7687",
@@ -28,10 +29,10 @@
 		password=null;
 		try{
 			await DatabaseSession.session.ExecuteWriteAsync( async (_) => { });
-			NavigationManager.NavigateTo("/counter");
+			NavigationManager.NavigateTo("/create");
 		}
 		catch(AuthenticationException e){
-			Console.WriteLine("Failed");
+			message="Invalid username or password.";
 		}
 	}
 }
