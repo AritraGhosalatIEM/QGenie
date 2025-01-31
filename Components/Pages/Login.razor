@@ -31,7 +31,7 @@
 			await DatabaseSession.session.ExecuteWriteAsync( async (_) => { });
 			NavigationManager.NavigateTo("/create");
 		}
-		catch(AuthenticationException e){
+		catch(AuthenticationException _){
 			message="Invalid username or password.";
 		}
 	}

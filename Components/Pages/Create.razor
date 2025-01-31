@@ -2,6 +2,9 @@
 @rendermode InteractiveServer
 @using Neo4j.Driver;
 @using System.Text;
+@using System.Text;
+@using Humanizer;
+@using Markdig;
 @inject NavigationManager NavigationManager
 @inject DatabaseSession DatabaseSession
 <PageTitle>Create</PageTitle>
@@ -30,31 +33,52 @@
 </div>
 <div>
 	Subjects:
-	<select @bind="subject" id="paper" name="Paper">
+	<select @onchange="SetSubject" id="paper" name="Paper">
 		<option hidden disabled selected value>-- Select --</option>
 		@subjects
 	</select>
 </div>
+<div>
+	Exam:
+	<select @bind="exam_type" id="paper" name="Paper">
+		<option selecter>End Semester</option>
+		<option>Mid Semester</option>
+	</select>
+</div>
+<div>
+	<input type="month" @bind="month">
+</div>
+<div>
+	<button @onclick="GenerateQuestionPaper" disabled="@generation_enabled">Generate</button>
+</div>
+<div>
+	@question_paper
+</div>
 @code{
-	private MarkupString streams,semesters,subjects;
-	private string stream,semester,subject,paper_type="All";
+	private MarkupString streams,semesters,subjects,question_paper;
+	private string stream,semester,subject,exam_type="End Semester",paper_type="All";
+	private DateTime month;
+	private bool generation_enabled=true;
+	private MarkdownPipeline pipeline;
 	protected override async Task OnInitializedAsync(){
+		month=DateTime.Now;
+		pipeline=new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
 		StringBuilder element=new StringBuilder();
-		IResultCursor result=await DatabaseSession.session.RunAsync("match (n:Stream) return n;"); 
+		IResultCursor result=await DatabaseSession.session.RunAsync("match (n:Stream) return n.code;"); 
 		await foreach(IRecord record in result)			
 			element.AppendFormat(
 				"<option value=\"{0}\">{0}</option>",
-				record["n"].As<INode>().Properties["code"]
+				record["n.code"]
 			);
 		streams=new MarkupString(element.ToString());
 	}
 	async void SetSemesters(ChangeEventArgs e){
 		StringBuilder element=new StringBuilder();
-		IResultCursor result=await DatabaseSession.session.RunAsync("match (Stream{code:\""+(stream=e.Value.ToString())+"\"})-[:Has]->(n:Semester) return n;"); 
+		IResultCursor result=await DatabaseSession.session.RunAsync("match (Stream{code:\""+(stream=e.Value.ToString())+"\"})-[:Has]->(n:Semester) return n.number order by n.number;"); 
 		await foreach(IRecord record in result)			
 			element.AppendFormat(
-				"<option value=\"{0}\">{0}</option>",
-				record["n"].As<INode>().Properties["number"]
+				"<option value=\"{0}\">{0}.</option>",
+				record["n.number"]
 			);
 		semesters=new MarkupString(element.ToString());
 		StateHasChanged();
@@ -70,12 +94,12 @@
 			(paper_type.Equals("All")?"":
 				"{type:\""+paper_type+"\"}"
 			)+
-			") return n;"
+			") return n.name;"
 		); 
 		await foreach(IRecord record in result)			
 			element.AppendFormat(
 				"<option value=\"{0}\">{0}</option>",
-				record["n"].As<INode>().Properties["name"]
+				record["n.name"]
 			);
 		subjects=new MarkupString(element.ToString());
 		StateHasChanged();
@@ -84,6 +108,104 @@
 		paper_type=e.Value.ToString();
 		ChangeEventArgs dupe=new ChangeEventArgs();
 		dupe.Value=semester;
+		StateHasChanged();
 		SetSubjects(dupe);
+	}
+	async void SetSubject(ChangeEventArgs e){
+		subject=e.Value.ToString();
+		generation_enabled=false;
+	}
+	async void GenerateQuestionPaper(){
+		IResultCursor db_result=await DatabaseSession.session.RunAsync("match (n:Exam{type:\""+exam_type+"\"}) return n;");
+		await db_result.FetchAsync();
+		IReadOnlyDictionary<string,object> exam=db_result.Current["n"].As<INode>().Properties;
+		string
+			semester_string=Convert.ToInt32(semester).ToOrdinalWords(),
+			month_string=month.ToString("MMMM - yyyy"),
+			duration=exam["duration"].ToString(),
+			marks=exam["marks"].ToString();
+		semester_string=semester_string.Substring(0,1).ToUpper()+semester_string.Substring(1);
+		db_result=await DatabaseSession.session.RunAsync("match (:Stream{code:\""+stream+"\"})-[:Has]->(:Semester{number:"+semester+"})-[:Has]->(n:Subject{name:\""+subject+"\"}) return n.code");
+		await db_result.FetchAsync();
+		string paper_code=(string)db_result.Current["n.code"];
+		StringBuilder qp=new StringBuilder($@"
+			<center>
+				<div><img src=""header.png""></div>
+				<div><b>{exam_type} Examination, {month_string}</b></div>
+				<div>Degree: <b>B.Tech</b>,	Semester: <b>{semester_string}</b></div>
+				<div>Stream: <b>{stream}</b></div>
+				<div>Paper Code: <b>{paper_code}</b></div>
+				<div>Paper Name: <b>{subject}</b></div>
+			</center>
+			<div>
+				<span style=""float:left"">Full Marks: {marks}</span>
+				<span style=""float:right"">Duration: {duration} Hours</span>
+			</div>
+			<div>
+			<p>
+				<hr>
+			</p>
+			</div>
+		");
+		List<IRecord> sections=new List<IRecord>();
+		await foreach(IRecord record in
+			await DatabaseSession.session.RunAsync("match (:Exam{type:\""+exam_type+"\"})-[:Has]->(n:Section) order by n.name return n")
+		)
+			sections.Add(record);
+		foreach(IRecord record in sections){//sections
+			IReadOnlyDictionary<string,object> section=record["n"].As<INode>().Properties;
+			long total,score;
+			qp.AppendFormat(@"
+				<center>
+					<b>
+						<div>
+							Part - {0}
+						</div>
+						<div>
+							Attempt {1} questions out of {2} questions
+						</div>
+						<div>
+							Each question carries {3} marks ({3} X {1})
+						</div>
+					</b>
+					<table>
+				",
+				section["name"],
+				section["attempt"],
+				total=(long)section["total"],
+				score=(long)section["marks"]
+			);
+			db_result=await DatabaseSession.session.RunAsync($"match (:Subject{{code:\"{paper_code}\"}})-[:Has]->(n:Question{{marks:{score}}}) with n,rand() as r order by r return n.text limit {total}");
+			for(int i=1;i<=total;i++){
+				await db_result.FetchAsync();
+				qp.AppendFormat(@"
+						<tr>
+							<td style=""float:left"">
+								<b>{0}.</b>
+							</td>
+							<td style=""width:100%"">
+								{1}
+							</td>
+							<td style=""float:right"">
+								<b>{2}</b>
+							</td>
+						</tr>
+					",
+					i,
+					Markdown.ToHtml((string)db_result.Current["n.text"]),
+					score
+				);
+			}
+			qp.Append("</table>");
+		}
+		qp.Append(@"
+			<center>
+				<p>
+					**********
+				</p>
+			</center>
+		");
+		question_paper=new MarkupString(qp.ToString());
+		StateHasChanged();
 	}
 }
