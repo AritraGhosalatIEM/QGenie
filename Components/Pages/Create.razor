@@ -257,11 +257,8 @@
 		paperPdf.Close();
 		downloadDisabled=false;
 		StateHasChanged();
-		DownloadPDF();//testing
 	}
 	async void DownloadPDF(){
-		@* MemoryStream pdf=new MemoryStream(); *@
-		@* HtmlConverter.ConvertToPdf(paperHtml,pdf); *@
 		await JS.InvokeVoidAsync("savepdf",$"{stream}-{semester}-{subject}-{examType}.pdf",Convert.ToBase64String(pdf.ToArray()));
 	}
 }
