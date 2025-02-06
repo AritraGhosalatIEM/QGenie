@@ -2,11 +2,19 @@
 @rendermode InteractiveServer
 @using Neo4j.Driver;
 @using System.Text;
-@using System.Text;
 @using Humanizer;
 @using Markdig;
+@using iText.Html2pdf;
+@using iText.Layout;
+@using iText.Layout.Borders;
+@using iText.Layout.Element;
+@using iText.Layout.Properties;
+@using iText.Kernel.Geom;
+@using iText.Kernel.Pdf;
+@inject IJSRuntime JS;
 @inject NavigationManager NavigationManager
 @inject DatabaseSession DatabaseSession
+<script src="scripts.js"></script>
 <PageTitle>Create</PageTitle>
 <div>
 	Stream:
@@ -40,7 +48,7 @@
 </div>
 <div>
 	Exam:
-	<select @bind="exam_type" id="paper" name="Paper">
+	<select @bind="examType" id="paper" name="Paper">
 		<option selecter>End Semester</option>
 		<option>Mid Semester</option>
 	</select>
@@ -49,17 +57,23 @@
 	<input type="month" @bind="month">
 </div>
 <div>
-	<button @onclick="GenerateQuestionPaper" disabled="@generation_enabled">Generate</button>
+	<button @onclick="GenerateQuestionPaper" disabled="@generationDisabled">Generate</button>
 </div>
 <div>
-	@question_paper
+	@questionPaper
+</div>
+<div>
+	<center>
+		<button @onclick="DownloadPDF" disabled="@downloadDisabled">Download</button>
+	</center>
 </div>
 @code{
-	private MarkupString streams,semesters,subjects,question_paper;
-	private string stream,semester,subject,exam_type="End Semester",paper_type="All";
+	private MarkupString streams,semesters,subjects,questionPaper;
+	private string stream,semester,subject,paperHtml,examType="End Semester",paperType="All";
 	private DateTime month;
-	private bool generation_enabled=true;
+	private bool generationDisabled=true,downloadDisabled=true;
 	private MarkdownPipeline pipeline;
+	private MemoryStream pdf;
 	protected override async Task OnInitializedAsync(){
 		month=DateTime.Now;
 		pipeline=new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
@@ -77,7 +91,7 @@
 		IResultCursor result=await DatabaseSession.session.RunAsync("match (Stream{code:\""+(stream=e.Value.ToString())+"\"})-[:Has]->(n:Semester) return n.number order by n.number;"); 
 		await foreach(IRecord record in result)			
 			element.AppendFormat(
-				"<option value=\"{0}\">{0}.</option>",
+				"<option value=\"{0}\">{0}</option>",
 				record["n.number"]
 			);
 		semesters=new MarkupString(element.ToString());
@@ -91,8 +105,8 @@
 			"\"})-[:Has]->(Semester{number:"+
 			(semester=e.Value.ToString())+
 			"})-[:Has]->(n:Subject"+
-			(paper_type.Equals("All")?"":
-				"{type:\""+paper_type+"\"}"
+			(paperType.Equals("All")?"":
+				"{type:\""+paperType+"\"}"
 			)+
 			") return n.name;"
 		); 
@@ -105,7 +119,7 @@
 		StateHasChanged();
 	}
 	async void SetSubjectsFromPaper(ChangeEventArgs e){
-		paper_type=e.Value.ToString();
+		paperType=e.Value.ToString();
 		ChangeEventArgs dupe=new ChangeEventArgs();
 		dupe.Value=semester;
 		StateHasChanged();
@@ -113,28 +127,30 @@
 	}
 	async void SetSubject(ChangeEventArgs e){
 		subject=e.Value.ToString();
-		generation_enabled=false;
+		generationDisabled=false;
 	}
 	async void GenerateQuestionPaper(){
-		IResultCursor db_result=await DatabaseSession.session.RunAsync("match (n:Exam{type:\""+exam_type+"\"}) return n;");
-		await db_result.FetchAsync();
-		IReadOnlyDictionary<string,object> exam=db_result.Current["n"].As<INode>().Properties;
+		PdfDocument paperPdfPdf=new PdfDocument(new PdfWriter(pdf=new MemoryStream()));
+		Document paperPdf=new Document(paperPdfPdf,PageSize.A4);
+		IResultCursor dbResult=await DatabaseSession.session.RunAsync("match (n:Exam{type:\""+examType+"\"}) return n;");
+		await dbResult.FetchAsync();
+		IReadOnlyDictionary<string,object> exam=dbResult.Current["n"].As<INode>().Properties;
 		string
-			semester_string=Convert.ToInt32(semester).ToOrdinalWords(),
-			month_string=month.ToString("MMMM - yyyy"),
+			semesterString=Convert.ToInt32(semester).ToOrdinalWords(),
+			monthString=month.ToString("MMMM - yyyy"),
 			duration=exam["duration"].ToString(),
 			marks=exam["marks"].ToString();
-		semester_string=semester_string.Substring(0,1).ToUpper()+semester_string.Substring(1);
-		db_result=await DatabaseSession.session.RunAsync("match (:Stream{code:\""+stream+"\"})-[:Has]->(:Semester{number:"+semester+"})-[:Has]->(n:Subject{name:\""+subject+"\"}) return n.code");
-		await db_result.FetchAsync();
-		string paper_code=(string)db_result.Current["n.code"];
-		StringBuilder qp=new StringBuilder($@"
+		semesterString=semesterString.Substring(0,1).ToUpper()+semesterString.Substring(1);
+		dbResult=await DatabaseSession.session.RunAsync("match (:Stream{code:\""+stream+"\"})-[:Has]->(:Semester{number:"+semester+"})-[:Has]->(n:Subject{name:\""+subject+"\"}) return n.code");
+		await dbResult.FetchAsync();
+		string paperCode=(string)dbResult.Current["n.code"];
+		String html=$@"
 			<center>
 				<div><img src=""header.png""></div>
-				<div><b>{exam_type} Examination, {month_string}</b></div>
-				<div>Degree: <b>B.Tech</b>,	Semester: <b>{semester_string}</b></div>
+				<div><b>{examType} Examination, {monthString}</b></div>
+				<div>Degree: <b>B.Tech</b>,	Semester: <b>{semesterString}</b></div>
 				<div>Stream: <b>{stream}</b></div>
-				<div>Paper Code: <b>{paper_code}</b></div>
+				<div>Paper Code: <b>{paperCode}</b></div>
 				<div>Paper Name: <b>{subject}</b></div>
 			</center>
 			<div>
@@ -146,16 +162,20 @@
 				<hr>
 			</p>
 			</div>
-		");
+		";
+		StringBuilder qp=new StringBuilder(html);
+		foreach(IElement element in HtmlConverter.ConvertToElements(html))
+			paperPdf.Add((IBlockElement)element);
 		List<IRecord> sections=new List<IRecord>();
+		byte questionNumber=0;
 		await foreach(IRecord record in
-			await DatabaseSession.session.RunAsync("match (:Exam{type:\""+exam_type+"\"})-[:Has]->(n:Section) order by n.name return n")
+			await DatabaseSession.session.RunAsync("match (:Exam{type:\""+examType+"\"})-[:Has]->(n:Section) order by n.name return n")
 		)
 			sections.Add(record);
 		foreach(IRecord record in sections){//sections
 			IReadOnlyDictionary<string,object> section=record["n"].As<INode>().Properties;
 			long total,score;
-			qp.AppendFormat(@"
+			html=String.Format(@"
 				<center>
 					<b>
 						<div>
@@ -175,9 +195,14 @@
 				total=(long)section["total"],
 				score=(long)section["marks"]
 			);
-			db_result=await DatabaseSession.session.RunAsync($"match (:Subject{{code:\"{paper_code}\"}})-[:Has]->(n:Question{{marks:{score}}}) with n,rand() as r order by r return n.text limit {total}");
+			qp.Append(html);
+			foreach(IElement element in HtmlConverter.ConvertToElements(html))
+				paperPdf.Add((IBlockElement)element);
+			Table questions=new Table(3);
+			questions.SetWidth(UnitValue.CreatePercentValue(100));
+			dbResult=await DatabaseSession.session.RunAsync($"match (:Subject{{code:\"{paperCode}\"}})-[:Has]->(n:Question{{marks:{score}}}) with n,rand() as r order by r return n.text limit {total}");
 			for(int i=1;i<=total;i++){
-				await db_result.FetchAsync();
+				await dbResult.FetchAsync();
 				qp.AppendFormat(@"
 						<tr>
 							<td style=""float:left"">
@@ -191,21 +216,52 @@
 							</td>
 						</tr>
 					",
-					i,
-					Markdown.ToHtml((string)db_result.Current["n.text"]),
+					++questionNumber,
+					html=Markdown.ToHtml((string)dbResult.Current["n.text"]),
 					score
 				);
+				Cell cell=new Cell();
+				cell.SetBorder(Border.NO_BORDER);
+				cell.Add(new Paragraph(questionNumber+"."));
+				questions.AddCell(cell);
+				cell=new Cell();
+				cell.SetBorder(Border.NO_BORDER);
+				cell.SetWidth(UnitValue.CreatePercentValue(100));
+				foreach(IElement element in HtmlConverter.ConvertToElements(html.Substring(3,html.Length-4)))//add question
+					cell.Add((IBlockElement)element);
+				questions.AddCell(cell);
+				cell=new Cell();
+				cell.SetBorder(Border.NO_BORDER);
+				cell.Add(new Paragraph(""+score));
+				questions.AddCell(cell);
 			}
+			paperPdf.Add(questions);
 			qp.Append("</table>");
 		}
-		qp.Append(@"
+		qp.Append(html=@"
 			<center>
 				<p>
 					**********
 				</p>
 			</center>
 		");
-		question_paper=new MarkupString(qp.ToString());
+		foreach(IElement element in HtmlConverter.ConvertToElements(html))//add ending line
+			paperPdf.Add((IBlockElement)element);
+		float x=paperPdf.GetLeftMargin()+10,y=paperPdf.GetBottomMargin()-10;
+		int pages=paperPdfPdf.GetNumberOfPages();
+		for(byte i=1;i<=pages;i++)//add page number
+			new Canvas(paperPdfPdf.GetPage(i),PageSize.A4)
+				.ShowTextAligned($"Page {i} of {pages}",x,y,TextAlignment.CENTER)
+				.Close();
+		questionPaper=new MarkupString(paperHtml=qp.ToString());
+		paperPdf.Close();
+		downloadDisabled=false;
 		StateHasChanged();
+		DownloadPDF();//testing
+	}
+	async void DownloadPDF(){
+		@* MemoryStream pdf=new MemoryStream(); *@
+		@* HtmlConverter.ConvertToPdf(paperHtml,pdf); *@
+		await JS.InvokeVoidAsync("savepdf",$"{stream}-{semester}-{subject}-{examType}.pdf",Convert.ToBase64String(pdf.ToArray()));
 	}
 }
