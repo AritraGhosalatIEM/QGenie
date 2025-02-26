@@ -131,7 +131,7 @@
 	}
 	async void GenerateQuestionPaper(){
 		PdfDocument paperPdfPdf=new PdfDocument(new PdfWriter(pdf=new MemoryStream()));
-		Document paperPdf=new Document(paperPdfPdf,PageSize.A4);
+		Document paperPdf=new Document(paperPdfPdf,PageSize.A4,false);
 		IResultCursor dbResult=await DatabaseSession.session.RunAsync("match (n:Exam{type:\""+examType+"\"}) return n;");
 		await dbResult.FetchAsync();
 		IReadOnlyDictionary<string,object> exam=dbResult.Current["n"].As<INode>().Properties;

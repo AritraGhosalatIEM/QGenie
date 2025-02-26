@@ -29,7 +29,7 @@
 		password=null;
 		try{
 			await DatabaseSession.session.ExecuteWriteAsync( async (_) => { });
-			NavigationManager.NavigateTo("/create");
+			NavigationManager.NavigateTo("/menu");
 		}
 		catch(AuthenticationException _){
 			message="Invalid username or password.";

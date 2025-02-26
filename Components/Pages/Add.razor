@@ -1,0 +1,116 @@
+@page "/add"
+@rendermode InteractiveServer
+@using Neo4j.Driver;
+@using System.Text;
+@using Markdig
+@inject NavigationManager NavigationManager
+@inject DatabaseSession DatabaseSession
+<PageTitle>Add</PageTitle>
+<div>
+	Stream:
+	<select @onchange="SetSemesters" id="stream" name="Stream">
+		<option hidden disabled selected value>-- Select --</option>
+		@streams
+	</select>
+</div>
+<div>
+	Semester:
+	<select @onchange="SetSubjects" id="semester" name="Semester">
+		<option hidden disabled selected value>-- Select --</option>
+		@semesters
+	</select>
+</div>
+<div>
+	Paper:
+	<select @onchange="SetSubjectsFromPaper" id="paper" name="Paper">
+		<option selected>All</option>
+		<option>Theory</option>
+		<option>Practical</option>
+		<option>Sessional</option>
+	</select>
+</div>
+<div>
+	Subjects:
+	<select @onchange="SetSubject" id="paper" name="Paper">
+		<option hidden disabled selected value>-- Select --</option>
+		@subjects
+	</select>
+</div>
+<p>
+	<small>For more information on Markdown visit: <a href="https://markdown.puresourcecode.com/demo">demo</a></small>
+</p>
+<div>
+	<MarkdownEditor/>
+</div>
+<div>
+	Marks:
+	<select name="Paper">
+		<option selected>2</option>
+		<option>5</option>
+		<option>10</option>
+	</select>
+</div>
+<div>
+	<button @onclick="AddQuestion" disabled="@additionDisabled">Add</button>
+</div>
+@code{
+	private MarkupString streams,semesters,subjects;
+	private string stream,semester,subject,paperHtml,examType="End Semester",paperType="All";
+	private bool additionDisabled=true;
+	protected override async Task OnInitializedAsync(){
+		StringBuilder element=new StringBuilder();
+		IResultCursor result=await DatabaseSession.session.RunAsync("match (n:Stream) return n.code;"); 
+		await foreach(IRecord record in result)			
+			element.AppendFormat(
+				"<option value=\"{0}\">{0}</option>",
+				record["n.code"]
+			);
+		streams=new MarkupString(element.ToString());
+	}
+	async void SetSemesters(ChangeEventArgs e){
+		StringBuilder element=new StringBuilder();
+		IResultCursor result=await DatabaseSession.session.RunAsync("match (Stream{code:\""+(stream=e.Value.ToString())+"\"})-[:Has]->(n:Semester) return n.number order by n.number;"); 
+		await foreach(IRecord record in result)			
+			element.AppendFormat(
+				"<option value=\"{0}\">{0}</option>",
+				record["n.number"]
+			);
+		semesters=new MarkupString(element.ToString());
+		StateHasChanged();
+	}
+	async void SetSubjects(ChangeEventArgs e){
+		StringBuilder element=new StringBuilder();
+		IResultCursor result=await DatabaseSession.session.RunAsync(
+			"match (Stream{code:\""+
+			stream+
+			"\"})-[:Has]->(Semester{number:"+
+			(semester=e.Value.ToString())+
+			"})-[:Has]->(n:Subject"+
+			(paperType.Equals("All")?"":
+				"{type:\""+paperType+"\"}"
+			)+
+			") return n.name;"
+		); 
+		await foreach(IRecord record in result)			
+			element.AppendFormat(
+				"<option value=\"{0}\">{0}</option>",
+				record["n.name"]
+			);
+		subjects=new MarkupString(element.ToString());
+		StateHasChanged();
+	}
+	async void SetSubjectsFromPaper(ChangeEventArgs e){
+		paperType=e.Value.ToString();
+		ChangeEventArgs dupe=new ChangeEventArgs();
+		dupe.Value=semester;
+		StateHasChanged();
+		SetSubjects(dupe);
+	}
+	async void SetSubject(ChangeEventArgs e){
+		subject=e.Value.ToString();
+		additionDisabled=false;
+	}
+	async Task AddQuestion(){
+		
+	}
+}

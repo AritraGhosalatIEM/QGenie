@@ -1,0 +1,15 @@
+@page "/menu"
+@rendermode InteractiveServer
+@inject NavigationManager NavigationManager
+<PageTitle>Menu</PageTitle>
+<button @onclick="toCreate">Create question paper</button>
+<button @onclick="toAdd">Add question</button>
+@code{
+	//TODO: add cookies if possible
+	private async Task toCreate(){
+		NavigationManager.NavigateTo("/create");
+	}
+	private async Task toAdd(){
+		NavigationManager.NavigateTo("/add");
+	}
+}
